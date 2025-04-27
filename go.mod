@@ -1,4 +1,4 @@
-module ahatconfig
+module github.com/AhatLi/ahatconfig-go
 
 go 1.21.1
 
