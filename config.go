@@ -14,14 +14,26 @@ import (
 )
 
 var (
-	instance interface{}
-	once     sync.Once
-	AppName  string
-	envMap   map[string]string
+	instance   interface{}
+	once       sync.Once
+	AppName    string
+	configPath string
 )
 
 func InitConfig[T any](appname string) {
 	AppName = appname
+
+	once.Do(func() {
+		err := LoadConfig[T]()
+		if err != nil {
+			panic(err)
+		}
+	})
+}
+
+func InitConfigWithPath[T any](appname, path string) {
+	AppName = appname
+	configPath = path
 
 	once.Do(func() {
 		err := LoadConfig[T]()
@@ -59,19 +71,20 @@ func LoadConfig[T any]() error {
 }
 
 func loadConfigFile[T any](cfg *T) error {
-	// 프로그램을 실행한 경로와 상관없이 실행파일의 경로에서 컨피그 파일을 찾도록 함
-	exePath, err := os.Executable()
-	if err != nil {
-		fmt.Println("Error getting executable path:", err)
-		return err
+	if configPath == "" {
+		// 프로그램을 실행한 경로와 상관없이 실행파일의 경로에서 컨피그 파일을 찾도록 함
+		exePath, err := os.Executable()
+		if err != nil {
+			fmt.Println("Error getting executable path:", err)
+			return err
+		}
+		configPath, err = filepath.Abs(exePath)
+		if err != nil {
+			fmt.Println("Error getting absolute path:", err)
+		}
 	}
-	absPath, err := filepath.Abs(exePath)
 
-	if err != nil {
-		fmt.Println("Error getting absolute path:", err)
-	}
-
-	dirPath := filepath.Dir(absPath)
+	dirPath := filepath.Dir(configPath)
 
 	tree, err := toml.LoadFile(filepath.Join(dirPath, AppName+".toml"))
 	if err != nil {
