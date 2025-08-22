@@ -98,7 +98,6 @@ func loadConfigFile[T any](cfg *T) error {
 		return err
 	}
 
-	fmt.Println("🔹TOML Loaded")
 	return err
 }
 
@@ -175,31 +174,15 @@ func isZero(v reflect.Value) bool {
 
 func loadConfigEnv[T any](cfg *T) error {
 	v := reflect.ValueOf(cfg)
-	if v.Kind() == reflect.Struct {
-		v = v.Addr() // 포인터로 변환
-	}
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
-	t := v.Type()
 
-	for i := 0; i < t.NumField(); i++ {
-		fieldValue := v.Field(i)
-
-		// 구조체 내부 순회
-		if fieldValue.Kind() == reflect.Struct {
-			t := v.Type()
-			field := t.Field(i)
-
-			if err := loadStructEnv(fieldValue, field.Name); err != nil {
-				fmt.Println(err)
-				return err
-			}
-		}
+	if v.Kind() != reflect.Struct {
+		return nil // 구조체가 아니면 무시
 	}
 
-	fmt.Println("🔹Env Loaded")
-	return nil
+	return loadStructEnv(v, AppName)
 }
 
 func loadStructEnv(v reflect.Value, parentPrefix string) error {
@@ -214,13 +197,14 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 		required := strings.ToLower(field.Tag.Get("required")) == "true"
 
 		envKeyBase := strings.ToUpper(parentPrefix + "_" + envTag)
+		if envTag == "" {
+			envKeyBase = strings.ToUpper(parentPrefix + "_" + field.Name)
+		}
 
 		// --- ✅ 슬라이스(특히 []struct) 처리 ---
 		if value.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Struct {
 			sliceValues, err := loadStructSliceEnv(envKeyBase, field.Type.Elem())
 			if err != nil {
-				fmt.Println("ahat 1 [", envTag, envTag, defaultValue)
-				fmt.Println(err)
 				return err
 			}
 			value.Set(reflect.Append(value, sliceValues...))
@@ -230,13 +214,24 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 		// --- ✅ 일반 필드 처리 ---
 		envValue := os.Getenv(envKeyBase)
 
+		// 중첩 구조체는 값을 직접 설정하지 않고 재귀적으로 처리하므로 건너뛴다.
+		if value.Kind() == reflect.Struct {
+			if err := loadStructEnv(value, envKeyBase); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if envValue == "" && required {
 			if defaultValue != "" {
 				envValue = defaultValue
 			} else {
-				fmt.Println("ahat 2")
-				fmt.Println(fmt.Errorf("Required field %s is not set", envKeyBase))
-				return fmt.Errorf("Required field %s is not set", envKeyBase)
+				// checkRequiredField와 오류 메시지 형식을 통일합니다.
+				tagName := envTag
+				if tagName == "" {
+					tagName = field.Name
+				}
+				return fmt.Errorf("required field '%s' is missing or empty", tagName)
 			}
 		}
 
@@ -248,8 +243,6 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			if envValue != "" {
 				num, err := strconv.Atoi(envValue)
 				if err != nil {
-					fmt.Println("ahat 3")
-					fmt.Println(err)
 					return err
 				}
 				value.SetInt(int64(num))
@@ -259,8 +252,6 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			if envValue != "" {
 				b, err := strconv.ParseBool(envValue)
 				if err != nil {
-					fmt.Println("ahat 4")
-					fmt.Println(err)
 					return err
 				}
 				value.SetBool(b)
@@ -270,8 +261,6 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			if envValue != "" {
 				f, err := strconv.ParseFloat(envValue, 64)
 				if err != nil {
-					fmt.Println("ahat 5")
-					fmt.Println(err)
 					return err
 				}
 				value.SetFloat(f)
@@ -291,16 +280,12 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 					case reflect.Int:
 						n, err := strconv.Atoi(s)
 						if err != nil {
-							fmt.Println("ahat 6")
-							fmt.Println(err)
 							return err
 						}
 						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(n))
 					case reflect.Float64:
 						f, err := strconv.ParseFloat(s, 64)
 						if err != nil {
-							fmt.Println("ahat 7")
-							fmt.Println(err)
 							return err
 						}
 						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(f))
@@ -311,13 +296,6 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 				}
 				value.Set(sliceVal)
 			}
-		case reflect.Struct:
-			err := loadStructEnv(value, field.Name)
-			if err != nil {
-				fmt.Println("ahat 8")
-				fmt.Println(err)
-				return err
-			}
 		}
 	}
 
@@ -325,9 +303,6 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 }
 
 func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) {
-	fmt.Println("ahat 1-1", prefix)
-	fmt.Println("ahat 1-2", t)
-
 	var result []reflect.Value
 
 	for i := 0; ; i++ {
@@ -343,16 +318,11 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 			envKey := fmt.Sprintf("%s_%d_%s", prefix, i, strings.ToUpper(tag))
 			envVal := os.Getenv(envKey)
 
-			fmt.Println("ahat 1-8 tag", tag)
-			fmt.Println("ahat 1-8 envKey", envKey)
-			fmt.Println("ahat 1-8 envVal", envVal)
-
 			if envVal != "" {
 				hasAnyValue = true
 			}
 
 			fieldVal := elem.Field(j)
-			fmt.Println("ahat 1-7", fieldVal)
 
 			switch fieldVal.Kind() {
 			case reflect.String:
@@ -361,7 +331,6 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 				if envVal != "" {
 					num, err := strconv.Atoi(envVal)
 					if err != nil {
-						fmt.Println("ahat 1-3")
 						return nil, err
 					}
 					fieldVal.SetInt(int64(num))
@@ -370,7 +339,6 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 				if envVal != "" {
 					b, err := strconv.ParseBool(envVal)
 					if err != nil {
-						fmt.Println("ahat 1-4")
 						return nil, err
 					}
 					fieldVal.SetBool(b)
@@ -395,7 +363,6 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 						}
 						n, err := strconv.Atoi(s)
 						if err != nil {
-							fmt.Println("ahat 1-5", s)
 							return nil, err
 						}
 						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(n))
