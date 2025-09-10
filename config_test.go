@@ -1,4 +1,4 @@
-package AhatGoKit
+package ahatconfig
 
 import (
 	"bytes"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	AhatGoKit "github.com/AhatLi/ahatconfig-go"
+	ahatconfig "github.com/AhatLi/ahatconfig-go"
 )
 
 // ErrorConfig demonstrates error handling with missing required fields
@@ -26,7 +26,7 @@ func main() {
 
 	// Example 1: Safe initialization with error handling
 	fmt.Println("\n1. Safe initialization:")
-	err := AhatGoKit.InitConfigSafe[ErrorConfig]("errorapp")
+	err := ahatconfig.InitConfigSafe[ErrorConfig]("errorapp")
 	if err != nil {
 		fmt.Printf("❌ Configuration error: %v\n", err)
 		fmt.Println("   This is expected because required fields are missing")
@@ -36,7 +36,7 @@ func main() {
 
 	// Example 2: Safe config retrieval
 	fmt.Println("\n2. Safe config retrieval:")
-	cfg, err := AhatGoKit.GetConfigSafe[ErrorConfig]()
+	cfg, err := ahatconfig.GetConfigSafe[ErrorConfig]()
 	if err != nil {
 		fmt.Printf("❌ Config retrieval error: %v\n", err)
 		fmt.Println("   This is expected because config was not initialized")
@@ -47,8 +47,8 @@ func main() {
 	// Example 3: Panic-based API (commented out to avoid actual panic)
 	fmt.Println("\n3. Panic-based API:")
 	fmt.Println("   // This would panic if called:")
-	fmt.Println("   // AhatGoKit.InitConfig[ErrorConfig](\"errorapp\")")
-	fmt.Println("   // cfg := AhatGoKit.GetConfig[ErrorConfig]()")
+	fmt.Println("   // ahatconfig.InitConfig[ErrorConfig](\"errorapp\")")
+	fmt.Println("   // cfg := ahatconfig.GetConfig[ErrorConfig]()")
 	fmt.Println("   // Use InitConfigSafe and GetConfigSafe for production!")
 
 	// Example 4: Demonstrating proper error handling pattern
@@ -58,14 +58,14 @@ func main() {
 
 func demonstrateProperErrorHandling() {
 	// This is the recommended pattern for production applications
-	err := AhatGoKit.InitConfigSafe[ErrorConfig]("errorapp")
+	err := ahatconfig.InitConfigSafe[ErrorConfig]("errorapp")
 	if err != nil {
 		log.Printf("Failed to initialize configuration: %v", err)
 		log.Println("Please check your configuration file or environment variables")
 		return
 	}
 
-	cfg, err := AhatGoKit.GetConfigSafe[ErrorConfig]()
+	cfg, err := ahatconfig.GetConfigSafe[ErrorConfig]()
 	if err != nil {
 		log.Printf("Failed to retrieve configuration: %v", err)
 		return

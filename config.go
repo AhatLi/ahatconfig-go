@@ -1,4 +1,4 @@
-package AhatGoKit
+package ahatconfig
 
 import (
 	"encoding/json"
@@ -75,7 +75,7 @@ func getCachedTypeInfo(t reflect.Type) *TypeInfo {
 //
 // Example:
 //
-//	AhatGoKit.InitConfig[MyConfig]("myapp")
+//	ahatconfig.InitConfig[MyConfig]("myapp")
 func InitConfig[T any](appname string) {
 	AppName = appname
 
@@ -94,7 +94,7 @@ func InitConfig[T any](appname string) {
 //
 // Example:
 //
-//	AhatGoKit.InitConfigWithPath[MyConfig]("myapp", "/custom/path")
+//	ahatconfig.InitConfigWithPath[MyConfig]("myapp", "/custom/path")
 func InitConfigWithPath[T any](appname, path string) {
 	AppName = appname
 	configPath = path
@@ -113,7 +113,7 @@ func InitConfigWithPath[T any](appname, path string) {
 //
 // Example:
 //
-//	err := AhatGoKit.InitConfigSafe[MyConfig]("myapp")
+//	err := ahatconfig.InitConfigSafe[MyConfig]("myapp")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -127,7 +127,7 @@ func InitConfigSafe[T any](appname string) error {
 //
 // Example:
 //
-//	err := AhatGoKit.InitConfigWithPathSafe[MyConfig]("myapp", "/custom/path")
+//	err := ahatconfig.InitConfigWithPathSafe[MyConfig]("myapp", "/custom/path")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -452,7 +452,7 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 //
 // Example:
 //
-//	cfg := AhatGoKit.GetConfig[MyConfig]()
+//	cfg := ahatconfig.GetConfig[MyConfig]()
 func GetConfig[T any]() *T {
 	if instance == nil {
 		panic("Config not initialized. Call InitConfig first.")
@@ -469,7 +469,7 @@ func GetConfig[T any]() *T {
 //
 // Example:
 //
-//	cfg, err := AhatGoKit.GetConfigSafe[MyConfig]()
+//	cfg, err := ahatconfig.GetConfigSafe[MyConfig]()
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -490,7 +490,7 @@ func GetConfigSafe[T any]() (*T, error) {
 //
 // Example:
 //
-//	AhatGoKit.PrintConfig()
+//	ahatconfig.PrintConfig()
 //	// Output:
 //	// 🔹 config:
 //	// {

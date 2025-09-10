@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	AhatGoKit "github.com/AhatLi/ahatconfig-go"
+	ahatconfig "github.com/AhatLi/ahatconfig-go"
 )
 
 // AdvancedConfig demonstrates advanced features like slices and nested structures
@@ -49,13 +49,13 @@ type AdvancedConfig struct {
 
 func main() {
 	// Initialize configuration
-	err := AhatGoKit.InitConfigSafe[AdvancedConfig]("advancedapp")
+	err := ahatconfig.InitConfigSafe[AdvancedConfig]("advancedapp")
 	if err != nil {
 		log.Fatal("Failed to load config:", err)
 	}
 
 	// Get configuration
-	cfg, err := AhatGoKit.GetConfigSafe[AdvancedConfig]()
+	cfg, err := ahatconfig.GetConfigSafe[AdvancedConfig]()
 	if err != nil {
 		log.Fatal("Failed to get config:", err)
 	}
@@ -89,5 +89,5 @@ func main() {
 
 	// Print configuration (with secret masking)
 	fmt.Println("\n📋 Full Configuration:")
-	AhatGoKit.PrintConfig()
+	ahatconfig.PrintConfig()
 }
