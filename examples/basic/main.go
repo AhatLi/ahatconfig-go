@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	AhatGoKit "github.com/AhatLi/ahatconfig-go"
+	ahatconfig "github.com/AhatLi/ahatconfig-go"
 )
 
 // BasicConfig demonstrates basic configuration structure
@@ -28,13 +28,13 @@ type BasicConfig struct {
 
 func main() {
 	// Initialize configuration
-	err := AhatGoKit.InitConfigSafe[BasicConfig]("basicapp")
+	err := ahatconfig.InitConfigSafe[BasicConfig]("basicapp")
 	if err != nil {
 		log.Fatal("Failed to load config:", err)
 	}
 
 	// Get configuration
-	cfg, err := AhatGoKit.GetConfigSafe[BasicConfig]()
+	cfg, err := ahatconfig.GetConfigSafe[BasicConfig]()
 	if err != nil {
 		log.Fatal("Failed to get config:", err)
 	}
@@ -46,5 +46,5 @@ func main() {
 
 	// Print configuration (with secret masking)
 	fmt.Println("\n📋 Configuration:")
-	AhatGoKit.PrintConfig()
+	ahatconfig.PrintConfig()
 }

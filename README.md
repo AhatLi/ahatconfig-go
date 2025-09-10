@@ -49,10 +49,10 @@ type AppConfig struct {
 
 func main() {
     // Initialize configuration
-    AhatGoKit.InitConfig[AppConfig]("myapp")
+    ahatconfig.InitConfig[AppConfig]("myapp")
     
     // Get configuration
-    cfg := AhatGoKit.GetConfig[AppConfig]()
+    cfg := ahatconfig.GetConfig[AppConfig]()
     
     fmt.Printf("Server: %s:%d\n", cfg.Server.Host, cfg.Server.Port)
     fmt.Printf("Database User: %s\n", cfg.Database.User)
@@ -111,14 +111,14 @@ export MYAPP_FEATURES_ENABLED=true
 Initializes configuration with panic on error (recommended for simple applications).
 
 ```go
-AhatGoKit.InitConfig[AppConfig]("myapp")
+ahatconfig.InitConfig[AppConfig]("myapp")
 ```
 
 #### `InitConfigSafe[T](appname string) error`
 Initializes configuration and returns error instead of panicking.
 
 ```go
-err := AhatGoKit.InitConfigSafe[AppConfig]("myapp")
+err := ahatconfig.InitConfigSafe[AppConfig]("myapp")
 if err != nil {
     log.Fatal(err)
 }
@@ -128,7 +128,7 @@ if err != nil {
 Initializes configuration with custom executable path.
 
 ```go
-AhatGoKit.InitConfigWithPath[AppConfig]("myapp", "/custom/path")
+ahatconfig.InitConfigWithPath[AppConfig]("myapp", "/custom/path")
 ```
 
 #### `InitConfigWithPathSafe[T](appname, path string) error`
@@ -140,14 +140,14 @@ Safe version with custom path and error return.
 Gets configuration with panic on error.
 
 ```go
-cfg := AhatGoKit.GetConfig[AppConfig]()
+cfg := ahatconfig.GetConfig[AppConfig]()
 ```
 
 #### `GetConfigSafe[T]() (*T, error)`
 Gets configuration and returns error instead of panicking.
 
 ```go
-cfg, err := AhatGoKit.GetConfigSafe[AppConfig]()
+cfg, err := ahatconfig.GetConfigSafe[AppConfig]()
 if err != nil {
     log.Fatal(err)
 }
@@ -159,7 +159,7 @@ if err != nil {
 Prints configuration with secret masking.
 
 ```go
-AhatGoKit.PrintConfig()
+ahatconfig.PrintConfig()
 // Output:
 // 🔹 config:
 // {
@@ -243,19 +243,19 @@ For slices:
 ### Panic-based API (Default)
 ```go
 // Will panic if configuration fails to load
-AhatGoKit.InitConfig[AppConfig]("myapp")
-cfg := AhatGoKit.GetConfig[AppConfig]()
+ahatconfig.InitConfig[AppConfig]("myapp")
+cfg := ahatconfig.GetConfig[AppConfig]()
 ```
 
 ### Error-based API (Recommended for production)
 ```go
 // Returns error instead of panicking
-err := AhatGoKit.InitConfigSafe[AppConfig]("myapp")
+err := ahatconfig.InitConfigSafe[AppConfig]("myapp")
 if err != nil {
     log.Fatal("Failed to load config:", err)
 }
 
-cfg, err := AhatGoKit.GetConfigSafe[AppConfig]()
+cfg, err := ahatconfig.GetConfigSafe[AppConfig]()
 if err != nil {
     log.Fatal("Failed to get config:", err)
 }

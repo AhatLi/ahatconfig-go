@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	AhatGoKit "github.com/AhatLi/ahatconfig-go"
+	ahatconfig "github.com/AhatLi/ahatconfig-go"
 )
 
 // EnvConfig demonstrates environment variable configuration
@@ -41,13 +41,13 @@ func main() {
 	os.Setenv("ENVAPP_CONFIG_TYPE", "env")
 
 	// Initialize configuration
-	err := AhatGoKit.InitConfigSafe[EnvConfig]("envapp")
+	err := ahatconfig.InitConfigSafe[EnvConfig]("envapp")
 	if err != nil {
 		log.Fatal("Failed to load config:", err)
 	}
 
 	// Get configuration
-	cfg, err := AhatGoKit.GetConfigSafe[EnvConfig]()
+	cfg, err := ahatconfig.GetConfigSafe[EnvConfig]()
 	if err != nil {
 		log.Fatal("Failed to get config:", err)
 	}
@@ -65,7 +65,7 @@ func main() {
 
 	// Print configuration (with secret masking)
 	fmt.Println("\n📋 Configuration from Environment Variables:")
-	AhatGoKit.PrintConfig()
+	ahatconfig.PrintConfig()
 }
 
 func setupEnvVars() {
