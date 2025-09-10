@@ -1,0 +1,12 @@
+[server]
+host = "localhost"
+port = 3000
+
+[database]
+user = "admin"
+password = "secret123"
+host = "db.example.com"
+port = 5432
+
+[features]
+enabled = true
