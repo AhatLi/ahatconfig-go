@@ -3,6 +3,7 @@ package AhatGoKit
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,6 +21,61 @@ var (
 	configPath string
 )
 
+// TypeInfo caches reflection information for performance optimization.
+// It stores pre-computed field metadata to avoid repeated reflection operations.
+type TypeInfo struct {
+	Fields []FieldInfo
+}
+
+// FieldInfo contains cached field information extracted from struct tags.
+// This information is computed once and reused for better performance.
+type FieldInfo struct {
+	Name         string       // Field name
+	Type         reflect.Type // Field type
+	EnvTag       string       // Environment variable tag
+	DefaultValue string       // Default value tag
+	Required     bool         // Required field flag
+	Secret       bool         // Secret masking flag
+}
+
+// typeCache stores cached type information
+var typeCache sync.Map
+
+// getCachedTypeInfo returns cached type information or creates and caches it
+func getCachedTypeInfo(t reflect.Type) *TypeInfo {
+	if cached, ok := typeCache.Load(t); ok {
+		return cached.(*TypeInfo)
+	}
+
+	typeInfo := &TypeInfo{
+		Fields: make([]FieldInfo, 0, t.NumField()),
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldInfo := FieldInfo{
+			Name:         field.Name,
+			Type:         field.Type,
+			EnvTag:       field.Tag.Get("env"),
+			DefaultValue: field.Tag.Get("default"),
+			Required:     strings.ToLower(field.Tag.Get("required")) == "true",
+			Secret:       strings.ToLower(field.Tag.Get("secret")) == "true",
+		}
+		typeInfo.Fields = append(typeInfo.Fields, fieldInfo)
+	}
+
+	typeCache.Store(t, typeInfo)
+	return typeInfo
+}
+
+// InitConfig initializes the configuration for the given application name.
+// It loads configuration from TOML file or environment variables based on the
+// {APPNAME}_CONFIG_TYPE environment variable.
+// Panics if configuration loading fails.
+//
+// Example:
+//
+//	AhatGoKit.InitConfig[MyConfig]("myapp")
 func InitConfig[T any](appname string) {
 	AppName = appname
 
@@ -31,6 +87,14 @@ func InitConfig[T any](appname string) {
 	})
 }
 
+// InitConfigWithPath initializes configuration with a custom executable path.
+// This is useful when the configuration file is not in the same directory
+// as the executable.
+// Panics if configuration loading fails.
+//
+// Example:
+//
+//	AhatGoKit.InitConfigWithPath[MyConfig]("myapp", "/custom/path")
 func InitConfigWithPath[T any](appname, path string) {
 	AppName = appname
 	configPath = path
@@ -43,6 +107,39 @@ func InitConfigWithPath[T any](appname, path string) {
 	})
 }
 
+// InitConfigSafe initializes configuration and returns error instead of panicking.
+// This is the recommended approach for production applications where you want
+// to handle configuration errors gracefully.
+//
+// Example:
+//
+//	err := AhatGoKit.InitConfigSafe[MyConfig]("myapp")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func InitConfigSafe[T any](appname string) error {
+	AppName = appname
+	return LoadConfig[T]()
+}
+
+// InitConfigWithPathSafe initializes configuration with custom path and returns error instead of panicking.
+// This combines the functionality of InitConfigWithPath with safe error handling.
+//
+// Example:
+//
+//	err := AhatGoKit.InitConfigWithPathSafe[MyConfig]("myapp", "/custom/path")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func InitConfigWithPathSafe[T any](appname, path string) error {
+	AppName = appname
+	configPath = path
+	return LoadConfig[T]()
+}
+
+// LoadConfig loads configuration from TOML file or environment variables.
+// The source is determined by the {APPNAME}_CONFIG_TYPE environment variable.
+// If set to "env", loads from environment variables, otherwise loads from TOML file.
 func LoadConfig[T any]() error {
 	var err error
 	cfg := new(T)
@@ -61,7 +158,7 @@ func LoadConfig[T any]() error {
 	v := reflect.ValueOf(cfg)
 	err = checkRequiredField(v)
 	if err != nil {
-		fmt.Printf("Config load failed: %s", err)
+		log.Printf("Config load failed: %s", err)
 		return err
 	}
 
@@ -75,12 +172,13 @@ func loadConfigFile[T any](cfg *T) error {
 		// 프로그램을 실행한 경로와 상관없이 실행파일의 경로에서 컨피그 파일을 찾도록 함
 		exePath, err := os.Executable()
 		if err != nil {
-			fmt.Println("Error getting executable path:", err)
+			log.Printf("Error getting executable path: %v", err)
 			return err
 		}
 		configPath, err = filepath.Abs(exePath)
 		if err != nil {
-			fmt.Println("Error getting absolute path:", err)
+			log.Printf("Error getting absolute path: %v", err)
+			return err
 		}
 	}
 
@@ -88,13 +186,13 @@ func loadConfigFile[T any](cfg *T) error {
 
 	tree, err := toml.LoadFile(filepath.Join(dirPath, AppName+".toml"))
 	if err != nil {
-		fmt.Printf("Config load failed: %s", err)
+		log.Printf("Config load failed: %v", err)
 		return err
 	}
 
 	err = tree.Unmarshal(cfg)
 	if err != nil {
-		fmt.Printf("Config load failed: %s", err)
+		log.Printf("Config load failed: %v", err)
 		return err
 	}
 
@@ -112,9 +210,9 @@ func checkRequiredField(v reflect.Value) error {
 	}
 
 	t := v.Type()
+	typeInfo := getCachedTypeInfo(t)
 
-	for i := 0; i < v.NumField(); i++ {
-		field := t.Field(i)
+	for i, fieldInfo := range typeInfo.Fields {
 		value := v.Field(i)
 
 		// 중첩 구조체면 재귀 검사
@@ -126,7 +224,7 @@ func checkRequiredField(v reflect.Value) error {
 		}
 
 		// 슬라이스 안의 구조체 검사
-		if value.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Struct {
+		if value.Kind() == reflect.Slice && fieldInfo.Type.Elem().Kind() == reflect.Struct {
 			for j := 0; j < value.Len(); j++ {
 				if err := checkRequiredField(value.Index(j)); err != nil {
 					return err
@@ -135,18 +233,15 @@ func checkRequiredField(v reflect.Value) error {
 			continue
 		}
 
-		required := strings.ToLower(field.Tag.Get("required")) == "true"
-		if !required {
+		if !fieldInfo.Required {
 			continue
 		}
 
 		// 비어있음 검사 (기본값 포함)
 		if isZero(value) {
-			envTag := field.Tag.Get("env")
-			fieldName := field.Name
-			tagName := envTag
+			tagName := fieldInfo.EnvTag
 			if tagName == "" {
-				tagName = fieldName
+				tagName = fieldInfo.Name
 			}
 			return fmt.Errorf("required field '%s' is missing or empty", tagName)
 		}
@@ -172,6 +267,72 @@ func isZero(v reflect.Value) bool {
 	}
 }
 
+// parseEnvValue parses environment variable value to the target type.
+// Supports string, int, bool, float64, and slice types.
+// Returns the parsed value or an error if parsing fails.
+func parseEnvValue(envValue string, targetType reflect.Type) (interface{}, error) {
+	if envValue == "" {
+		return getZeroValue(targetType), nil
+	}
+
+	switch targetType.Kind() {
+	case reflect.String:
+		return envValue, nil
+	case reflect.Int, reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8:
+		return strconv.Atoi(envValue)
+	case reflect.Bool:
+		return strconv.ParseBool(envValue)
+	case reflect.Float64, reflect.Float32:
+		return strconv.ParseFloat(envValue, 64)
+	case reflect.Slice:
+		return parseSliceValue(envValue, targetType)
+	default:
+		return nil, fmt.Errorf("unsupported type: %v", targetType.Kind())
+	}
+}
+
+// parseSliceValue parses comma-separated values into a slice.
+// Handles slices of string, int, bool, and float64 types.
+// Empty values are skipped during parsing.
+func parseSliceValue(envValue string, sliceType reflect.Type) (interface{}, error) {
+	elemType := sliceType.Elem()
+	strs := strings.Split(envValue, ",")
+	sliceVal := reflect.MakeSlice(sliceType, 0, len(strs))
+
+	for _, s := range strs {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+
+		parsed, err := parseEnvValue(s, elemType)
+		if err != nil {
+			return nil, err
+		}
+		sliceVal = reflect.Append(sliceVal, reflect.ValueOf(parsed))
+	}
+	return sliceVal.Interface(), nil
+}
+
+// getZeroValue returns the zero value for the given type.
+// Used when environment variable is empty or not set.
+func getZeroValue(t reflect.Type) interface{} {
+	switch t.Kind() {
+	case reflect.String:
+		return ""
+	case reflect.Int, reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8:
+		return 0
+	case reflect.Bool:
+		return false
+	case reflect.Float64, reflect.Float32:
+		return 0.0
+	case reflect.Slice:
+		return reflect.MakeSlice(t, 0, 0).Interface()
+	default:
+		return reflect.Zero(t).Interface()
+	}
+}
+
 func loadConfigEnv[T any](cfg *T) error {
 	v := reflect.ValueOf(cfg)
 	if v.Kind() == reflect.Ptr {
@@ -187,23 +348,19 @@ func loadConfigEnv[T any](cfg *T) error {
 
 func loadStructEnv(v reflect.Value, parentPrefix string) error {
 	t := v.Type()
+	typeInfo := getCachedTypeInfo(t)
 
-	for i := 0; i < v.NumField(); i++ {
-		field := t.Field(i)
+	for i, fieldInfo := range typeInfo.Fields {
 		value := v.Field(i)
 
-		envTag := field.Tag.Get("env")
-		defaultValue := field.Tag.Get("default")
-		required := strings.ToLower(field.Tag.Get("required")) == "true"
-
-		envKeyBase := strings.ToUpper(parentPrefix + "_" + envTag)
-		if envTag == "" {
-			envKeyBase = strings.ToUpper(parentPrefix + "_" + field.Name)
+		envKeyBase := strings.ToUpper(parentPrefix + "_" + fieldInfo.EnvTag)
+		if fieldInfo.EnvTag == "" {
+			envKeyBase = strings.ToUpper(parentPrefix + "_" + fieldInfo.Name)
 		}
 
 		// --- ✅ 슬라이스(특히 []struct) 처리 ---
-		if value.Kind() == reflect.Slice && field.Type.Elem().Kind() == reflect.Struct {
-			sliceValues, err := loadStructSliceEnv(envKeyBase, field.Type.Elem())
+		if value.Kind() == reflect.Slice && fieldInfo.Type.Elem().Kind() == reflect.Struct {
+			sliceValues, err := loadStructSliceEnv(envKeyBase, fieldInfo.Type.Elem())
 			if err != nil {
 				return err
 			}
@@ -222,80 +379,26 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			continue
 		}
 
-		if envValue == "" && required {
-			if defaultValue != "" {
-				envValue = defaultValue
+		if envValue == "" && fieldInfo.Required {
+			if fieldInfo.DefaultValue != "" {
+				envValue = fieldInfo.DefaultValue
 			} else {
 				// checkRequiredField와 오류 메시지 형식을 통일합니다.
-				tagName := envTag
+				tagName := fieldInfo.EnvTag
 				if tagName == "" {
-					tagName = field.Name
+					tagName = fieldInfo.Name
 				}
 				return fmt.Errorf("required field '%s' is missing or empty", tagName)
 			}
 		}
 
-		switch value.Kind() {
-		case reflect.String:
-			value.SetString(envValue)
-
-		case reflect.Int:
-			if envValue != "" {
-				num, err := strconv.Atoi(envValue)
-				if err != nil {
-					return err
-				}
-				value.SetInt(int64(num))
+		// Use unified parser for type conversion
+		if envValue != "" || !isZero(value) {
+			parsed, err := parseEnvValue(envValue, value.Type())
+			if err != nil {
+				return fmt.Errorf("failed to parse env value for field %s: %w", fieldInfo.Name, err)
 			}
-
-		case reflect.Bool:
-			if envValue != "" {
-				b, err := strconv.ParseBool(envValue)
-				if err != nil {
-					return err
-				}
-				value.SetBool(b)
-			}
-
-		case reflect.Float64:
-			if envValue != "" {
-				f, err := strconv.ParseFloat(envValue, 64)
-				if err != nil {
-					return err
-				}
-				value.SetFloat(f)
-			}
-
-		case reflect.Slice:
-			elemKind := field.Type.Elem().Kind()
-			if envValue != "" {
-				strs := strings.Split(envValue, ",")
-				sliceVal := reflect.MakeSlice(field.Type, 0, len(strs))
-
-				for _, s := range strs {
-					s = strings.TrimSpace(s)
-					switch elemKind {
-					case reflect.String:
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(s))
-					case reflect.Int:
-						n, err := strconv.Atoi(s)
-						if err != nil {
-							return err
-						}
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(n))
-					case reflect.Float64:
-						f, err := strconv.ParseFloat(s, 64)
-						if err != nil {
-							return err
-						}
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(f))
-					case reflect.Bool:
-						b := strings.ToLower(s) == "true"
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(b))
-					}
-				}
-				value.Set(sliceVal)
-			}
+			value.Set(reflect.ValueOf(parsed))
 		}
 	}
 
@@ -324,54 +427,13 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 
 			fieldVal := elem.Field(j)
 
-			switch fieldVal.Kind() {
-			case reflect.String:
-				fieldVal.SetString(envVal)
-			case reflect.Int:
-				if envVal != "" {
-					num, err := strconv.Atoi(envVal)
-					if err != nil {
-						return nil, err
-					}
-					fieldVal.SetInt(int64(num))
+			// Use unified parser for type conversion
+			if envVal != "" || !isZero(fieldVal) {
+				parsed, err := parseEnvValue(envVal, fieldVal.Type())
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse env value for field %s: %w", field.Name, err)
 				}
-			case reflect.Bool:
-				if envVal != "" {
-					b, err := strconv.ParseBool(envVal)
-					if err != nil {
-						return nil, err
-					}
-					fieldVal.SetBool(b)
-				}
-			case reflect.Slice:
-				if envVal == "" {
-					break // 빈 값이면 건너뜀
-				}
-
-				elemKind := fieldVal.Type().Elem().Kind()
-				strs := strings.Split(envVal, ",")
-				sliceVal := reflect.MakeSlice(fieldVal.Type(), 0, len(strs))
-
-				for _, s := range strs {
-					s = strings.TrimSpace(s)
-					switch elemKind {
-					case reflect.String:
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(s))
-					case reflect.Int:
-						if s == "" {
-							continue
-						}
-						n, err := strconv.Atoi(s)
-						if err != nil {
-							return nil, err
-						}
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(n))
-					case reflect.Bool:
-						b := strings.ToLower(s) == "true"
-						sliceVal = reflect.Append(sliceVal, reflect.ValueOf(b))
-					}
-				}
-				fieldVal.Set(sliceVal)
+				fieldVal.Set(reflect.ValueOf(parsed))
 			}
 		}
 
@@ -385,6 +447,12 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 	return result, nil
 }
 
+// GetConfig retrieves the loaded configuration.
+// Panics if configuration is not initialized or type mismatch occurs.
+//
+// Example:
+//
+//	cfg := AhatGoKit.GetConfig[MyConfig]()
 func GetConfig[T any]() *T {
 	if instance == nil {
 		panic("Config not initialized. Call InitConfig first.")
@@ -396,11 +464,50 @@ func GetConfig[T any]() *T {
 	return cfg
 }
 
+// GetConfigSafe retrieves the loaded configuration and returns error instead of panicking.
+// This is the recommended approach for production applications.
+//
+// Example:
+//
+//	cfg, err := AhatGoKit.GetConfigSafe[MyConfig]()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func GetConfigSafe[T any]() (*T, error) {
+	if instance == nil {
+		return nil, fmt.Errorf("config not initialized, call InitConfig first")
+	}
+	cfg, ok := instance.(*T)
+	if !ok {
+		return nil, fmt.Errorf("invalid config type")
+	}
+	return cfg, nil
+}
+
+// PrintConfig prints the current configuration with secret masking applied.
+// Fields marked with secret:"true" will be displayed as "****".
+// This is useful for debugging and logging configuration values safely.
+//
+// Example:
+//
+//	AhatGoKit.PrintConfig()
+//	// Output:
+//	// 🔹 config:
+//	// {
+//	//   "Server": {
+//	//     "Host": "localhost",
+//	//     "Port": 8080
+//	//   },
+//	//   "Database": {
+//	//     "User": "admin",
+//	//     "Password": "****"
+//	//   }
+//	// }
 func PrintConfig() {
 	masked := maskSecrets(instance)
 	configBytes, err := json.MarshalIndent(masked, "", "  ")
 	if err != nil {
-		fmt.Printf("Failed to print config: %s", err)
+		log.Printf("Failed to print config: %v", err)
 		return
 	}
 
@@ -418,13 +525,12 @@ func maskSecrets(cfg interface{}) interface{} {
 	switch v.Kind() {
 	case reflect.Struct:
 		t := v.Type()
+		typeInfo := getCachedTypeInfo(t)
 		masked := map[string]interface{}{}
 
-		for i := 0; i < v.NumField(); i++ {
+		for i, fieldInfo := range typeInfo.Fields {
 			field := v.Field(i)
-			fieldType := t.Field(i)
-			secretTag := fieldType.Tag.Get("secret")
-			fieldName := fieldType.Name
+			fieldName := fieldInfo.Name
 
 			// 재귀 구조
 			if field.Kind() == reflect.Struct || field.Kind() == reflect.Slice {
@@ -433,7 +539,7 @@ func maskSecrets(cfg interface{}) interface{} {
 			}
 
 			// 시크릿 마스킹
-			if strings.ToLower(secretTag) == "true" {
+			if fieldInfo.Secret {
 				masked[fieldName] = "****"
 			} else {
 				masked[fieldName] = field.Interface()
@@ -451,45 +557,4 @@ func maskSecrets(cfg interface{}) interface{} {
 	default:
 		return cfg
 	}
-}
-
-func getEnvInt(envValue string) (int64, error) {
-	// required가 false 이면서 값이 없으므로 0을 반환하는 경우
-	if envValue == "" {
-		return 0, nil
-	}
-
-	tmp, err := strconv.ParseInt(strings.TrimSpace(envValue), 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return tmp, nil
-}
-
-func getEnvFloat(envValue string) (float64, error) {
-	if envValue == "" {
-		return 0, nil
-	}
-
-	tmp, err := strconv.ParseFloat(strings.TrimSpace(envValue), 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return tmp, nil
-}
-
-func getEnvBool(envValue string) (bool, error) {
-	if envValue == "" {
-		return false, nil
-	}
-
-	if strings.ToLower(envValue) == "true" {
-		return true, nil
-	} else if strings.ToLower(envValue) == "false" {
-		return false, nil
-	}
-
-	return false, fmt.Errorf("Invalid boolean value")
 }

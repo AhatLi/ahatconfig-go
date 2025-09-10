@@ -1,0 +1,39 @@
+[service]
+name = "my-microservice"
+version = "2.1.0"
+port = 8080
+
+[api]
+version = "v2"
+
+[api.rate_limit]
+requests = 200
+window = 60
+
+[[servers]]
+name = "web-server"
+url = "https://web.example.com"
+port = 443
+
+[[servers]]
+name = "api-server"
+url = "https://api.example.com"
+port = 443
+
+[[servers]]
+name = "internal-server"
+url = "http://internal.example.com"
+port = 8080
+
+ports = [8080, 9090, 3000]
+features = ["auth", "cache", "logging", "metrics"]
+flags = [true, false, true]
+
+[monitoring]
+enabled = true
+metrics = "/prometheus/metrics"
+health = "/health/check"
+
+[security]
+jwt_secret = "super-secret-jwt-key"
+api_key = "api-key-12345"

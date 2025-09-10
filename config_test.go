@@ -112,8 +112,9 @@ role = "user"
 		if cfg.Database.User != "testuser" {
 			t.Errorf("expected db user to be 'testuser', got '%s'", cfg.Database.User)
 		}
-		if !reflect.DeepEqual(cfg.Database.Hosts, []string{"db1.example.com", "db2.example.com"}) {
-			t.Errorf("expected db hosts to be '[db1.example.com db2.example.com]', got '%v'", cfg.Database.Hosts)
+		expectedHosts := []string{"db1.example.com", "db2.example.com"}
+		if !reflect.DeepEqual(cfg.Database.Hosts, expectedHosts) {
+			t.Errorf("expected db hosts to be %v, got %v", expectedHosts, cfg.Database.Hosts)
 		}
 		if len(cfg.Users) != 2 {
 			t.Fatalf("expected 2 users, got %d", len(cfg.Users))
@@ -160,8 +161,9 @@ role = "user"
 		if cfg.Database.User != "envuser" {
 			t.Errorf("expected db user to be 'envuser', got '%s'", cfg.Database.User)
 		}
-		if !reflect.DeepEqual(cfg.Database.Hosts, []string{"envdb1", "envdb2"}) {
-			t.Errorf("expected db hosts to be '[envdb1 envdb2]', got '%v'", cfg.Database.Hosts)
+		expectedEnvHosts := []string{"envdb1", "envdb2"}
+		if !reflect.DeepEqual(cfg.Database.Hosts, expectedEnvHosts) {
+			t.Errorf("expected db hosts to be %v, got %v", expectedEnvHosts, cfg.Database.Hosts)
 		}
 		if len(cfg.Users) != 2 {
 			t.Fatalf("expected 2 users, got %d", len(cfg.Users))
