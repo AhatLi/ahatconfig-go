@@ -130,10 +130,10 @@ role = "user"
 		}
 	})
 
-	t.Run("Load from Environment Variables", func(t *testing.T) {
+	t.Run("Load from Environment Variables Only", func(t *testing.T) {
 		resetGlobalConfig()
 		AppName = "TESTAPP"
-		t.Setenv("TESTAPP_CONFIG_TYPE", "env")
+		// No TOML file, only environment variables
 		t.Setenv("TESTAPP_SERVER_HOST", "envhost")
 		t.Setenv("TESTAPP_SERVER_PORT", "9090")
 		t.Setenv("TESTAPP_DATABASE_USER", "envuser")
@@ -206,7 +206,6 @@ user = "testuser"
 	t.Run("Required field missing from Env", func(t *testing.T) {
 		resetGlobalConfig()
 		AppName = "TESTAPP"
-		t.Setenv("TESTAPP_CONFIG_TYPE", "env")
 		// Missing TESTAPP_SERVER_HOST
 		t.Setenv("TESTAPP_SERVER_PORT", "9090")
 		t.Setenv("TESTAPP_DATABASE_USER", "envuser")
@@ -225,7 +224,6 @@ user = "testuser"
 	t.Run("Default values in environment variables", func(t *testing.T) {
 		resetGlobalConfig()
 		AppName = "TESTAPP"
-		t.Setenv("TESTAPP_CONFIG_TYPE", "env")
 		t.Setenv("TESTAPP_SERVER_HOST", "envhost")
 		// TESTAPP_SERVER_PORT is not set, should use default value 8080
 		t.Setenv("TESTAPP_DATABASE_USER", "envuser")
@@ -259,7 +257,6 @@ user = "testuser"
 
 		resetGlobalConfig()
 		AppName = "TESTSLICE"
-		t.Setenv("TESTSLICE_CONFIG_TYPE", "env")
 		// Set only one field for the first user, others should use defaults
 		t.Setenv("TESTSLICE_USERS_0_NAME", "Alice")
 		// TESTSLICE_USERS_0_ROLE is not set, should use default "user"
@@ -287,6 +284,90 @@ user = "testuser"
 		}
 		if cfg.Users[1].Role != "user" {
 			t.Errorf("expected user 1 role to use default 'user', got '%s'", cfg.Users[1].Role)
+		}
+	})
+
+	t.Run("Hybrid loading: TOML + Environment Variables", func(t *testing.T) {
+		resetGlobalConfig()
+		appName := "hybridapp"
+		tomlContent := `
+enabled = true
+[server]
+host = "tomlhost"
+port = 8000
+
+[database]
+user = "tomluser"
+password = "tomlpassword"
+hosts = ["tomldb1.example.com", "tomldb2.example.com"]
+
+[[users]]
+name = "TomlAlice"
+role = "toml_admin"
+
+[[users]]
+name = "TomlBob"
+role = "toml_user"
+`
+		_, cleanup := createTestTomlFile(t, appName, tomlContent)
+		defer cleanup()
+
+		AppName = appName
+
+		// Set some environment variables to override TOML values
+		t.Setenv("HYBRIDAPP_SERVER_HOST", "envhost") // Override TOML
+		// HYBRIDAPP_SERVER_PORT not set, should keep TOML value 8000
+		t.Setenv("HYBRIDAPP_DATABASE_PASSWORD", "envpassword") // Override TOML
+		// HYBRIDAPP_DATABASE_USER not set, should keep TOML value "tomluser"
+		t.Setenv("HYBRIDAPP_USERS_0_NAME", "EnvAlice")  // Override TOML
+		t.Setenv("HYBRIDAPP_USERS_0_ROLE", "env_admin") // Override TOML
+		t.Setenv("HYBRIDAPP_USERS_1_NAME", "EnvBob")    // Override TOML
+		t.Setenv("HYBRIDAPP_USERS_1_ROLE", "env_user")  // Override TOML
+
+		err := LoadConfig[TestConfig]()
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		cfg := GetConfig[TestConfig]()
+
+		// Environment variables should override TOML values
+		if cfg.Server.Host != "envhost" {
+			t.Errorf("expected server host to be 'envhost' (from env), got '%s'", cfg.Server.Host)
+		}
+		if cfg.Server.Port != 8000 {
+			t.Errorf("expected server port to be 8000 (from TOML), got %d", cfg.Server.Port)
+		}
+		if cfg.Database.User != "tomluser" {
+			t.Errorf("expected db user to be 'tomluser' (from TOML), got '%s'", cfg.Database.User)
+		}
+		if cfg.Database.Password != "envpassword" {
+			t.Errorf("expected db password to be 'envpassword' (from env), got '%s'", cfg.Database.Password)
+		}
+
+		// TOML values should be preserved where env vars are not set
+		expectedHosts := []string{"tomldb1.example.com", "tomldb2.example.com"}
+		if !reflect.DeepEqual(cfg.Database.Hosts, expectedHosts) {
+			t.Errorf("expected db hosts to be %v (from TOML), got %v", expectedHosts, cfg.Database.Hosts)
+		}
+
+		if len(cfg.Users) != 2 {
+			t.Fatalf("expected 2 users, got %d", len(cfg.Users))
+		}
+		if cfg.Users[0].Name != "EnvAlice" {
+			t.Errorf("expected user 0 name to be 'EnvAlice' (from env), got '%s'", cfg.Users[0].Name)
+		}
+		if cfg.Users[0].Role != "env_admin" {
+			t.Errorf("expected user 0 role to be 'env_admin' (from env), got '%s'", cfg.Users[0].Role)
+		}
+		if cfg.Users[1].Name != "EnvBob" {
+			t.Errorf("expected user 1 name to be 'EnvBob' (from env), got '%s'", cfg.Users[1].Name)
+		}
+		if cfg.Users[1].Role != "env_user" {
+			t.Errorf("expected user 1 role to be 'env_user' (from env), got '%s'", cfg.Users[1].Role)
+		}
+		if !cfg.Enabled {
+			t.Errorf("expected enabled to be true (from TOML), got false")
 		}
 	})
 

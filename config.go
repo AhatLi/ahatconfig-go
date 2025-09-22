@@ -137,22 +137,25 @@ func InitConfigWithPathSafe[T any](appname, path string) error {
 	return LoadConfig[T]()
 }
 
-// LoadConfig loads configuration from TOML file or environment variables.
-// The source is determined by the {APPNAME}_CONFIG_TYPE environment variable.
-// If set to "env", loads from environment variables, otherwise loads from TOML file.
+// LoadConfig loads configuration from TOML file first, then overrides with environment variables.
+// Environment variables have higher priority and will override TOML values.
+// This provides a hybrid approach where TOML serves as defaults and env vars as overrides.
 func LoadConfig[T any]() error {
 	var err error
 	cfg := new(T)
 
-	ctype := os.Getenv(strings.ToUpper(AppName) + "_CONFIG_TYPE")
-	if ctype == "env" {
-		if err = loadConfigEnv[T](cfg); err != nil {
-			return err
-		}
-	} else {
-		if err = loadConfigFile[T](cfg); err != nil {
-			return err
-		}
+	// First, try to load from TOML file (if it exists)
+	tomlErr := loadConfigFile[T](cfg)
+	if tomlErr != nil {
+		log.Printf("TOML config load failed (this is OK if file doesn't exist): %v", tomlErr)
+		// Continue with empty config - environment variables will populate it
+	}
+
+	// Then, override with environment variables (higher priority)
+	// Don't fail if env loading has issues - TOML values can serve as fallback
+	if envErr := loadConfigEnv[T](cfg); envErr != nil {
+		log.Printf("Environment variable loading failed (this is OK if no env vars are set): %v", envErr)
+		// Continue with TOML values only
 	}
 
 	v := reflect.ValueOf(cfg)
@@ -164,7 +167,7 @@ func LoadConfig[T any]() error {
 
 	instance = cfg
 
-	return err
+	return nil
 }
 
 func loadConfigFile[T any](cfg *T) error {
@@ -183,20 +186,27 @@ func loadConfigFile[T any](cfg *T) error {
 	}
 
 	dirPath := filepath.Dir(configPath)
+	tomlPath := filepath.Join(dirPath, AppName+".toml")
 
-	tree, err := toml.LoadFile(filepath.Join(dirPath, AppName+".toml"))
+	// Check if TOML file exists
+	if _, err := os.Stat(tomlPath); os.IsNotExist(err) {
+		// TOML file doesn't exist - this is OK, we'll use env vars only
+		return nil
+	}
+
+	tree, err := toml.LoadFile(tomlPath)
 	if err != nil {
-		log.Printf("Config load failed: %v", err)
+		log.Printf("TOML file exists but failed to load: %v", err)
 		return err
 	}
 
 	err = tree.Unmarshal(cfg)
 	if err != nil {
-		log.Printf("Config load failed: %v", err)
+		log.Printf("Failed to unmarshal TOML: %v", err)
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func checkRequiredField(v reflect.Value) error {
@@ -364,7 +374,12 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			if err != nil {
 				return err
 			}
-			value.Set(reflect.Append(value, sliceValues...))
+			// In hybrid mode, if env vars exist, replace TOML slice completely
+			// If no env vars, keep TOML slice
+			if len(sliceValues) > 0 {
+				value.Set(reflect.MakeSlice(value.Type(), 0, len(sliceValues)))
+				value.Set(reflect.Append(value, sliceValues...))
+			}
 			continue
 		}
 
@@ -379,23 +394,19 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			continue
 		}
 
-		// Apply default value if env is empty (regardless of required status)
-		if envValue == "" && fieldInfo.DefaultValue != "" {
+		// Apply default value if env is empty AND no TOML value exists
+		// In hybrid mode, TOML values should take precedence over defaults
+		if envValue == "" && fieldInfo.DefaultValue != "" && isZero(value) {
 			envValue = fieldInfo.DefaultValue
 		}
 
-		// Check required field validation
-		if envValue == "" && fieldInfo.Required {
-			// checkRequiredField와 오류 메시지 형식을 통일합니다.
-			tagName := fieldInfo.EnvTag
-			if tagName == "" {
-				tagName = fieldInfo.Name
-			}
-			return fmt.Errorf("required field '%s' is missing or empty", tagName)
-		}
+		// In hybrid mode, we don't validate required fields here
+		// Required field validation is done in checkRequiredField after all loading is complete
 
 		// Use unified parser for type conversion
-		if envValue != "" || !isZero(value) {
+		// Only set value if we have an environment variable or default value
+		// This preserves TOML values when no env var is set
+		if envValue != "" {
 			parsed, err := parseEnvValue(envValue, value.Type())
 			if err != nil {
 				return fmt.Errorf("failed to parse env value for field %s: %w", fieldInfo.Name, err)
