@@ -222,6 +222,74 @@ user = "testuser"
 		}
 	})
 
+	t.Run("Default values in environment variables", func(t *testing.T) {
+		resetGlobalConfig()
+		AppName = "TESTAPP"
+		t.Setenv("TESTAPP_CONFIG_TYPE", "env")
+		t.Setenv("TESTAPP_SERVER_HOST", "envhost")
+		// TESTAPP_SERVER_PORT is not set, should use default value 8080
+		t.Setenv("TESTAPP_DATABASE_USER", "envuser")
+
+		err := LoadConfig[TestConfig]()
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		cfg := GetConfig[TestConfig]()
+
+		if cfg.Server.Host != "envhost" {
+			t.Errorf("expected server host to be 'envhost', got '%s'", cfg.Server.Host)
+		}
+		if cfg.Server.Port != 8080 {
+			t.Errorf("expected server port to use default value 8080, got %d", cfg.Server.Port)
+		}
+		if cfg.Database.User != "envuser" {
+			t.Errorf("expected db user to be 'envuser', got '%s'", cfg.Database.User)
+		}
+	})
+
+	t.Run("Default values in struct slice environment variables", func(t *testing.T) {
+		// Test struct with default values in slice elements
+		type TestSliceConfig struct {
+			Users []struct {
+				Name string `env:"NAME" required:"true" default:"Anonymous"`
+				Role string `env:"ROLE" required:"true" default:"user"`
+			} `env:"USERS"`
+		}
+
+		resetGlobalConfig()
+		AppName = "TESTSLICE"
+		t.Setenv("TESTSLICE_CONFIG_TYPE", "env")
+		// Set only one field for the first user, others should use defaults
+		t.Setenv("TESTSLICE_USERS_0_NAME", "Alice")
+		// TESTSLICE_USERS_0_ROLE is not set, should use default "user"
+		t.Setenv("TESTSLICE_USERS_1_NAME", "Bob")
+		// TESTSLICE_USERS_1_ROLE is not set, should use default "user"
+
+		err := LoadConfig[TestSliceConfig]()
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		cfg := GetConfig[TestSliceConfig]()
+
+		if len(cfg.Users) != 2 {
+			t.Fatalf("expected 2 users, got %d", len(cfg.Users))
+		}
+		if cfg.Users[0].Name != "Alice" {
+			t.Errorf("expected user 0 name to be 'Alice', got '%s'", cfg.Users[0].Name)
+		}
+		if cfg.Users[0].Role != "user" {
+			t.Errorf("expected user 0 role to use default 'user', got '%s'", cfg.Users[0].Role)
+		}
+		if cfg.Users[1].Name != "Bob" {
+			t.Errorf("expected user 1 name to be 'Bob', got '%s'", cfg.Users[1].Name)
+		}
+		if cfg.Users[1].Role != "user" {
+			t.Errorf("expected user 1 role to use default 'user', got '%s'", cfg.Users[1].Role)
+		}
+	})
+
 	t.Run("PrintConfig with secret masking", func(t *testing.T) {
 		resetGlobalConfig()
 		appName := "testapp"

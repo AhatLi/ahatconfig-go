@@ -379,17 +379,19 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 			continue
 		}
 
+		// Apply default value if env is empty (regardless of required status)
+		if envValue == "" && fieldInfo.DefaultValue != "" {
+			envValue = fieldInfo.DefaultValue
+		}
+
+		// Check required field validation
 		if envValue == "" && fieldInfo.Required {
-			if fieldInfo.DefaultValue != "" {
-				envValue = fieldInfo.DefaultValue
-			} else {
-				// checkRequiredField와 오류 메시지 형식을 통일합니다.
-				tagName := fieldInfo.EnvTag
-				if tagName == "" {
-					tagName = fieldInfo.Name
-				}
-				return fmt.Errorf("required field '%s' is missing or empty", tagName)
+			// checkRequiredField와 오류 메시지 형식을 통일합니다.
+			tagName := fieldInfo.EnvTag
+			if tagName == "" {
+				tagName = fieldInfo.Name
 			}
+			return fmt.Errorf("required field '%s' is missing or empty", tagName)
 		}
 
 		// Use unified parser for type conversion
@@ -410,7 +412,7 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 
 	for i := 0; ; i++ {
 		elem := reflect.New(t).Elem()
-		hasAnyValue := false
+		hasAnyEnvValue := false // Only count actual environment variables, not defaults
 
 		for j := 0; j < t.NumField(); j++ {
 			field := t.Field(j)
@@ -421,8 +423,30 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 			envKey := fmt.Sprintf("%s_%d_%s", prefix, i, strings.ToUpper(tag))
 			envVal := os.Getenv(envKey)
 
+			// Get field info for default value and required check
+			fieldInfo := FieldInfo{
+				Name:         field.Name,
+				Type:         field.Type,
+				EnvTag:       tag,
+				DefaultValue: field.Tag.Get("default"),
+				Required:     strings.ToLower(field.Tag.Get("required")) == "true",
+				Secret:       strings.ToLower(field.Tag.Get("secret")) == "true",
+			}
+
+			// Only count actual environment variables for hasAnyEnvValue
 			if envVal != "" {
-				hasAnyValue = true
+				hasAnyEnvValue = true
+			}
+
+			// Apply default value if env is empty (regardless of required status)
+			if envVal == "" && fieldInfo.DefaultValue != "" {
+				envVal = fieldInfo.DefaultValue
+			}
+
+			// Check required field validation
+			if envVal == "" && fieldInfo.Required {
+				// required field인데 default 값도 없으면 에러
+				return nil, fmt.Errorf("required field '%s' is missing or empty", tag)
 			}
 
 			fieldVal := elem.Field(j)
@@ -437,7 +461,9 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 			}
 		}
 
-		if !hasAnyValue {
+		// Only break if no environment variables were found for this index
+		// This prevents infinite loop when only default values are present
+		if !hasAnyEnvValue {
 			break
 		}
 
