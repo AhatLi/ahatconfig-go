@@ -29,6 +29,22 @@ type TestConfig struct {
 	Enabled bool `toml:"enabled" env:"ENABLED"`
 }
 
+// 중첩된 구조체 슬라이스 테스트용 구조체
+type NestedStructSliceConfig struct {
+	Services []struct {
+		Name   string `toml:"name" env:"NAME"`
+		Config struct {
+			Host     string `toml:"host" env:"HOST"`
+			Port     int    `toml:"port" env:"PORT"`
+			Settings struct {
+				Timeout int    `toml:"timeout" env:"TIMEOUT" default:"30"`
+				Debug   bool   `toml:"debug" env:"DEBUG" default:"false"`
+				LogFile string `toml:"log_file" env:"LOG_FILE"`
+			} `toml:"settings" env:"SETTINGS"`
+		} `toml:"config" env:"CONFIG"`
+	} `toml:"services" env:"SERVICES"`
+}
+
 func resetGlobalConfig() {
 	instance = nil
 	once = sync.Once{}
@@ -411,4 +427,173 @@ password = "testpassword"
 			t.Errorf("expected password to not be visible, but it was. Output:\n%s", output)
 		}
 	})
+}
+
+// TestLoadStructSliceEnvNestedStructs는 중첩된 구조체 슬라이스의 환경변수 로딩을 테스트합니다
+func TestLoadStructSliceEnvNestedStructs(t *testing.T) {
+	// 환경변수 설정
+	envVars := map[string]string{
+		"SERVICES_0_NAME":                     "web-service",
+		"SERVICES_0_CONFIG_HOST":              "localhost",
+		"SERVICES_0_CONFIG_PORT":              "8080",
+		"SERVICES_0_CONFIG_SETTINGS_TIMEOUT":  "60",
+		"SERVICES_0_CONFIG_SETTINGS_DEBUG":    "true",
+		"SERVICES_0_CONFIG_SETTINGS_LOG_FILE": "/var/log/web.log",
+		"SERVICES_1_NAME":                     "api-service",
+		"SERVICES_1_CONFIG_HOST":              "api.example.com",
+		"SERVICES_1_CONFIG_PORT":              "9090",
+		"SERVICES_1_CONFIG_SETTINGS_TIMEOUT":  "120",
+		"SERVICES_1_CONFIG_SETTINGS_DEBUG":    "false",
+		"SERVICES_1_CONFIG_SETTINGS_LOG_FILE": "/var/log/api.log",
+	}
+
+	// 환경변수 설정
+	for key, value := range envVars {
+		os.Setenv(key, value)
+	}
+	defer func() {
+		// 테스트 후 환경변수 정리
+		for key := range envVars {
+			os.Unsetenv(key)
+		}
+	}()
+
+	// 구조체 타입 정보 가져오기
+	configType := reflect.TypeOf(NestedStructSliceConfig{})
+	servicesField, _ := configType.FieldByName("Services")
+	servicesType := servicesField.Type.Elem() // 슬라이스 요소 타입
+
+	// loadStructSliceEnv 함수 직접 테스트
+	result, err := loadStructSliceEnv("SERVICES", servicesType)
+	if err != nil {
+		t.Fatalf("loadStructSliceEnv failed: %v", err)
+	}
+
+	// 결과 검증
+	if len(result) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(result))
+	}
+
+	// 첫 번째 서비스 검증
+	service0 := result[0]
+	name0 := service0.FieldByName("Name").String()
+	if name0 != "web-service" {
+		t.Errorf("expected service 0 name to be 'web-service', got '%s'", name0)
+	}
+
+	config0 := service0.FieldByName("Config")
+	host0 := config0.FieldByName("Host").String()
+	if host0 != "localhost" {
+		t.Errorf("expected service 0 host to be 'localhost', got '%s'", host0)
+	}
+
+	port0 := config0.FieldByName("Port").Int()
+	if port0 != 8080 {
+		t.Errorf("expected service 0 port to be 8080, got %d", port0)
+	}
+
+	settings0 := config0.FieldByName("Settings")
+	timeout0 := settings0.FieldByName("Timeout").Int()
+	if timeout0 != 60 {
+		t.Errorf("expected service 0 timeout to be 60, got %d", timeout0)
+	}
+
+	debug0 := settings0.FieldByName("Debug").Bool()
+	if debug0 != true {
+		t.Errorf("expected service 0 debug to be true, got %v", debug0)
+	}
+
+	logFile0 := settings0.FieldByName("LogFile").String()
+	if logFile0 != "/var/log/web.log" {
+		t.Errorf("expected service 0 log file to be '/var/log/web.log', got '%s'", logFile0)
+	}
+
+	// 두 번째 서비스 검증
+	service1 := result[1]
+	name1 := service1.FieldByName("Name").String()
+	if name1 != "api-service" {
+		t.Errorf("expected service 1 name to be 'api-service', got '%s'", name1)
+	}
+
+	config1 := service1.FieldByName("Config")
+	host1 := config1.FieldByName("Host").String()
+	if host1 != "api.example.com" {
+		t.Errorf("expected service 1 host to be 'api.example.com', got '%s'", host1)
+	}
+
+	port1 := config1.FieldByName("Port").Int()
+	if port1 != 9090 {
+		t.Errorf("expected service 1 port to be 9090, got %d", port1)
+	}
+
+	settings1 := config1.FieldByName("Settings")
+	timeout1 := settings1.FieldByName("Timeout").Int()
+	if timeout1 != 120 {
+		t.Errorf("expected service 1 timeout to be 120, got %d", timeout1)
+	}
+
+	debug1 := settings1.FieldByName("Debug").Bool()
+	if debug1 != false {
+		t.Errorf("expected service 1 debug to be false, got %v", debug1)
+	}
+
+	logFile1 := settings1.FieldByName("LogFile").String()
+	if logFile1 != "/var/log/api.log" {
+		t.Errorf("expected service 1 log file to be '/var/log/api.log', got '%s'", logFile1)
+	}
+}
+
+// TestLoadStructSliceEnvNestedStructsWithDefaults는 중첩된 구조체 슬라이스에서 기본값이 적용되는지 테스트합니다
+func TestLoadStructSliceEnvNestedStructsWithDefaults(t *testing.T) {
+	// 환경변수 설정 (일부만 설정하고 기본값 테스트)
+	envVars := map[string]string{
+		"SERVICES_0_NAME":        "web-service",
+		"SERVICES_0_CONFIG_HOST": "localhost",
+		"SERVICES_0_CONFIG_PORT": "8080",
+		// TIMEOUT과 DEBUG는 기본값 사용
+		"SERVICES_0_CONFIG_SETTINGS_LOG_FILE": "/var/log/web.log",
+	}
+
+	// 환경변수 설정
+	for key, value := range envVars {
+		os.Setenv(key, value)
+	}
+	defer func() {
+		// 테스트 후 환경변수 정리
+		for key := range envVars {
+			os.Unsetenv(key)
+		}
+	}()
+
+	// 구조체 타입 정보 가져오기
+	configType := reflect.TypeOf(NestedStructSliceConfig{})
+	servicesField, _ := configType.FieldByName("Services")
+	servicesType := servicesField.Type.Elem() // 슬라이스 요소 타입
+
+	// loadStructSliceEnv 함수 직접 테스트
+	result, err := loadStructSliceEnv("SERVICES", servicesType)
+	if err != nil {
+		t.Fatalf("loadStructSliceEnv failed: %v", err)
+	}
+
+	// 결과 검증
+	if len(result) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(result))
+	}
+
+	// 서비스 검증
+	service0 := result[0]
+	config0 := service0.FieldByName("Config")
+	settings0 := config0.FieldByName("Settings")
+
+	// 기본값 검증
+	timeout0 := settings0.FieldByName("Timeout").Int()
+	if timeout0 != 30 { // default:"30"
+		t.Errorf("expected service 0 timeout to be 30 (default), got %d", timeout0)
+	}
+
+	debug0 := settings0.FieldByName("Debug").Bool()
+	if debug0 != false { // default:"false"
+		t.Errorf("expected service 0 debug to be false (default), got %v", debug0)
+	}
 }

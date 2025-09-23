@@ -418,6 +418,74 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 	return nil
 }
 
+// hasStructEnvValues는 중첩된 구조체에 환경변수 값이 있는지 확인하는 헬퍼 함수
+func hasStructEnvValues(v reflect.Value, prefix string) bool {
+	t := v.Type()
+	typeInfo := getCachedTypeInfo(t)
+
+	for i, fieldInfo := range typeInfo.Fields {
+		value := v.Field(i)
+
+		envKeyBase := strings.ToUpper(prefix + "_" + fieldInfo.EnvTag)
+		if fieldInfo.EnvTag == "" {
+			envKeyBase = strings.ToUpper(prefix + "_" + fieldInfo.Name)
+		}
+
+		// 슬라이스 필드 처리
+		if value.Kind() == reflect.Slice && fieldInfo.Type.Elem().Kind() == reflect.Struct {
+			// 슬라이스의 첫 번째 요소에 대해 확인
+			if hasStructSliceEnvValues(envKeyBase, fieldInfo.Type.Elem()) {
+				return true
+			}
+			continue
+		}
+
+		// 중첩 구조체 재귀 확인
+		if value.Kind() == reflect.Struct {
+			if hasStructEnvValues(value, envKeyBase) {
+				return true
+			}
+			continue
+		}
+
+		// 일반 필드 확인
+		if os.Getenv(envKeyBase) != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasStructSliceEnvValues는 구조체 슬라이스에 환경변수 값이 있는지 확인하는 헬퍼 함수
+func hasStructSliceEnvValues(prefix string, t reflect.Type) bool {
+	// 첫 번째 인덱스(0)에 대해서만 확인
+	envKey := fmt.Sprintf("%s_0_", prefix)
+
+	// 구조체의 모든 필드에 대해 환경변수가 있는지 확인
+	for j := 0; j < t.NumField(); j++ {
+		field := t.Field(j)
+		tag := field.Tag.Get("env")
+		if tag == "" {
+			tag = field.Name
+		}
+		fieldEnvKey := envKey + strings.ToUpper(tag)
+
+		if os.Getenv(fieldEnvKey) != "" {
+			return true
+		}
+
+		// 중첩된 구조체 필드 확인
+		if field.Type.Kind() == reflect.Struct {
+			if hasStructEnvValues(reflect.New(field.Type).Elem(), fieldEnvKey) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) {
 	var result []reflect.Value
 
@@ -444,6 +512,20 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 				Secret:       strings.ToLower(field.Tag.Get("secret")) == "true",
 			}
 
+			fieldVal := elem.Field(j)
+
+			// 중첩된 구조체는 재귀적으로 처리
+			if fieldVal.Kind() == reflect.Struct {
+				if err := loadStructEnv(fieldVal, envKey); err != nil {
+					return nil, err
+				}
+				// 구조체 필드가 처리되었는지 확인 (하위 필드에 env 값이 있는지)
+				if hasStructEnvValues(fieldVal, envKey) {
+					hasAnyEnvValue = true
+				}
+				continue
+			}
+
 			// Only count actual environment variables for hasAnyEnvValue
 			if envVal != "" {
 				hasAnyEnvValue = true
@@ -459,8 +541,6 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 				// required field인데 default 값도 없으면 에러
 				return nil, fmt.Errorf("required field '%s' is missing or empty", tag)
 			}
-
-			fieldVal := elem.Field(j)
 
 			// Use unified parser for type conversion
 			if envVal != "" || !isZero(fieldVal) {
