@@ -398,7 +398,9 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 		// 중첩 구조체는 값을 직접 설정하지 않고 재귀적으로 처리하므로 건너뛴다.
 		if value.Kind() == reflect.Struct {
 			// 환경변수가 있거나 기본값이 있는 경우 재귀적으로 처리
-			if envValue != "" || hasStructEnvValues(value, envKeyBase) || hasStructDefaultValues(value) {
+			hasEnvVars := hasStructEnvValues(value, envKeyBase)
+			hasDefaults := hasStructDefaultValues(value)
+			if envValue != "" || hasEnvVars || hasDefaults {
 				if err := loadStructEnv(value, envKeyBase); err != nil {
 					return err
 				}
@@ -456,14 +458,17 @@ func hasStructEnvValues(v reflect.Value, prefix string) bool {
 
 		// 중첩 구조체 재귀 확인
 		if value.Kind() == reflect.Struct {
+			log.Printf("DEBUG: Checking nested struct %s with prefix %s", fieldInfo.Name, envKeyBase)
 			if hasStructEnvValues(value, envKeyBase) {
+				log.Printf("DEBUG: Found env vars for nested struct %s", fieldInfo.Name)
 				return true
 			}
 			continue
 		}
 
 		// 일반 필드 확인
-		if os.Getenv(envKeyBase) != "" {
+		envValue := os.Getenv(envKeyBase)
+		if envValue != "" {
 			return true
 		}
 	}
@@ -570,9 +575,10 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 				envVal = fieldInfo.DefaultValue
 			}
 
-			// Check required field validation
-			if envVal == "" && fieldInfo.Required {
-				// required field인데 default 값도 없으면 에러
+			// Check required field validation - only if we have environment variables
+			// In env-only mode, we should not fail here as required validation is done later
+			if envVal == "" && fieldInfo.Required && hasAnyEnvValue {
+				// required field인데 default 값도 없으면 에러 (단, 환경변수가 있는 경우에만)
 				return nil, fmt.Errorf("required field '%s' is missing or empty", tag)
 			}
 
