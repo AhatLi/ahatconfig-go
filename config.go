@@ -171,22 +171,30 @@ func LoadConfig[T any]() error {
 }
 
 func loadConfigFile[T any](cfg *T) error {
-	if configPath == "" {
-		// 프로그램을 실행한 경로와 상관없이 실행파일의 경로에서 컨피그 파일을 찾도록 함
-		exePath, err := os.Executable()
-		if err != nil {
-			log.Printf("Error getting executable path: %v", err)
-			return err
-		}
-		configPath, err = filepath.Abs(exePath)
-		if err != nil {
-			log.Printf("Error getting absolute path: %v", err)
-			return err
-		}
-	}
+	var tomlPath string
 
-	dirPath := filepath.Dir(configPath)
-	tomlPath := filepath.Join(dirPath, AppName+".toml")
+	if configPath == "" {
+		// First try current working directory
+		wd, err := os.Getwd()
+		if err != nil {
+			log.Printf("Error getting working directory: %v", err)
+			return err
+		}
+		tomlPath = filepath.Join(wd, AppName+".toml")
+		// If not found in current directory, try executable directory
+		if _, err := os.Stat(tomlPath); os.IsNotExist(err) {
+			exePath, err := os.Executable()
+			if err != nil {
+				log.Printf("Error getting executable path: %v", err)
+				return err
+			}
+			exeDir := filepath.Dir(exePath)
+			tomlPath = filepath.Join(exeDir, AppName+".toml")
+		}
+	} else {
+		dirPath := filepath.Dir(configPath)
+		tomlPath = filepath.Join(dirPath, AppName+".toml")
+	}
 
 	// Check if TOML file exists
 	if _, err := os.Stat(tomlPath); os.IsNotExist(err) {
@@ -205,7 +213,6 @@ func loadConfigFile[T any](cfg *T) error {
 		log.Printf("Failed to unmarshal TOML: %v", err)
 		return err
 	}
-
 	return nil
 }
 
@@ -363,9 +370,11 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 	for i, fieldInfo := range typeInfo.Fields {
 		value := v.Field(i)
 
-		envKeyBase := strings.ToUpper(parentPrefix + "_" + fieldInfo.EnvTag)
+		// Convert hyphens to underscores for environment variable names
+		normalizedPrefix := strings.ReplaceAll(strings.ToUpper(parentPrefix), "-", "_")
+		envKeyBase := normalizedPrefix + "_" + strings.ToUpper(fieldInfo.EnvTag)
 		if fieldInfo.EnvTag == "" {
-			envKeyBase = strings.ToUpper(parentPrefix + "_" + fieldInfo.Name)
+			envKeyBase = normalizedPrefix + "_" + strings.ToUpper(fieldInfo.Name)
 		}
 
 		// --- ✅ 슬라이스(특히 []struct) 처리 ---
@@ -388,8 +397,11 @@ func loadStructEnv(v reflect.Value, parentPrefix string) error {
 
 		// 중첩 구조체는 값을 직접 설정하지 않고 재귀적으로 처리하므로 건너뛴다.
 		if value.Kind() == reflect.Struct {
-			if err := loadStructEnv(value, envKeyBase); err != nil {
-				return err
+			// 환경변수가 있거나 기본값이 있는 경우 재귀적으로 처리
+			if envValue != "" || hasStructEnvValues(value, envKeyBase) || hasStructDefaultValues(value) {
+				if err := loadStructEnv(value, envKeyBase); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -426,9 +438,11 @@ func hasStructEnvValues(v reflect.Value, prefix string) bool {
 	for i, fieldInfo := range typeInfo.Fields {
 		value := v.Field(i)
 
-		envKeyBase := strings.ToUpper(prefix + "_" + fieldInfo.EnvTag)
+		// Convert hyphens to underscores for environment variable names
+		normalizedPrefix := strings.ReplaceAll(strings.ToUpper(prefix), "-", "_")
+		envKeyBase := normalizedPrefix + "_" + strings.ToUpper(fieldInfo.EnvTag)
 		if fieldInfo.EnvTag == "" {
-			envKeyBase = strings.ToUpper(prefix + "_" + fieldInfo.Name)
+			envKeyBase = normalizedPrefix + "_" + strings.ToUpper(fieldInfo.Name)
 		}
 
 		// 슬라이스 필드 처리
@@ -457,10 +471,27 @@ func hasStructEnvValues(v reflect.Value, prefix string) bool {
 	return false
 }
 
+// hasStructDefaultValues는 중첩된 구조체에 기본값이 있는지 확인하는 헬퍼 함수
+func hasStructDefaultValues(v reflect.Value) bool {
+	t := v.Type()
+	typeInfo := getCachedTypeInfo(t)
+
+	for _, fieldInfo := range typeInfo.Fields {
+		// 기본값이 있는 필드가 있으면 true 반환
+		if fieldInfo.DefaultValue != "" {
+			return true
+		}
+	}
+
+	return false
+}
+
 // hasStructSliceEnvValues는 구조체 슬라이스에 환경변수 값이 있는지 확인하는 헬퍼 함수
 func hasStructSliceEnvValues(prefix string, t reflect.Type) bool {
 	// 첫 번째 인덱스(0)에 대해서만 확인
-	envKey := fmt.Sprintf("%s_0_", prefix)
+	// Convert hyphens to underscores for environment variable names
+	normalizedPrefix := strings.ReplaceAll(strings.ToUpper(prefix), "-", "_")
+	envKey := fmt.Sprintf("%s_0_", normalizedPrefix)
 
 	// 구조체의 모든 필드에 대해 환경변수가 있는지 확인
 	for j := 0; j < t.NumField(); j++ {
@@ -489,6 +520,9 @@ func hasStructSliceEnvValues(prefix string, t reflect.Type) bool {
 func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) {
 	var result []reflect.Value
 
+	// Convert hyphens to underscores for environment variable names
+	normalizedPrefix := strings.ReplaceAll(strings.ToUpper(prefix), "-", "_")
+
 	for i := 0; ; i++ {
 		elem := reflect.New(t).Elem()
 		hasAnyEnvValue := false // Only count actual environment variables, not defaults
@@ -499,7 +533,7 @@ func loadStructSliceEnv(prefix string, t reflect.Type) ([]reflect.Value, error) 
 			if tag == "" {
 				tag = field.Name
 			}
-			envKey := fmt.Sprintf("%s_%d_%s", prefix, i, strings.ToUpper(tag))
+			envKey := fmt.Sprintf("%s_%d_%s", normalizedPrefix, i, strings.ToUpper(tag))
 			envVal := os.Getenv(envKey)
 
 			// Get field info for default value and required check

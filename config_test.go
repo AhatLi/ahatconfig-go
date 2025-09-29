@@ -597,3 +597,96 @@ func TestLoadStructSliceEnvNestedStructsWithDefaults(t *testing.T) {
 		t.Errorf("expected service 0 debug to be false (default), got %v", debug0)
 	}
 }
+
+// TestNestedStructDefaultValues는 중첩 구조체에서 기본값이 제대로 적용되는지 테스트합니다
+func TestNestedStructDefaultValues(t *testing.T) {
+	// 중첩 구조체에 기본값이 있는 테스트 구조체
+	type TestNestedConfig struct {
+		Server struct {
+			Host string `env:"HOST" default:"localhost"`
+			Port int    `env:"PORT" default:"8080"`
+		} `env:"SERVER"`
+		Database struct {
+			User     string `env:"USER" default:"admin"`
+			Password string `env:"PASSWORD" default:"password"`
+			Timeout  int    `env:"TIMEOUT" default:"30"`
+		} `env:"DATABASE"`
+	}
+
+	resetGlobalConfig()
+	AppName = "TESTNESTED"
+
+	// 환경변수를 전혀 설정하지 않고 기본값만 사용
+	err := LoadConfig[TestNestedConfig]()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	cfg := GetConfig[TestNestedConfig]()
+
+	// 기본값 검증
+	if cfg.Server.Host != "localhost" {
+		t.Errorf("expected server host to be 'localhost' (default), got '%s'", cfg.Server.Host)
+	}
+	if cfg.Server.Port != 8080 {
+		t.Errorf("expected server port to be 8080 (default), got %d", cfg.Server.Port)
+	}
+	if cfg.Database.User != "admin" {
+		t.Errorf("expected database user to be 'admin' (default), got '%s'", cfg.Database.User)
+	}
+	if cfg.Database.Password != "password" {
+		t.Errorf("expected database password to be 'password' (default), got '%s'", cfg.Database.Password)
+	}
+	if cfg.Database.Timeout != 30 {
+		t.Errorf("expected database timeout to be 30 (default), got %d", cfg.Database.Timeout)
+	}
+}
+
+// TestNestedStructWithPartialEnvVars는 중첩 구조체에서 일부만 환경변수로 설정하고 나머지는 기본값을 사용하는 테스트입니다
+func TestNestedStructWithPartialEnvVars(t *testing.T) {
+	type TestPartialConfig struct {
+		Server struct {
+			Host string `env:"HOST" default:"localhost"`
+			Port int    `env:"PORT" default:"8080"`
+		} `env:"SERVER"`
+		Database struct {
+			User     string `env:"USER" default:"admin"`
+			Password string `env:"PASSWORD" default:"password"`
+			Timeout  int    `env:"TIMEOUT" default:"30"`
+		} `env:"DATABASE"`
+	}
+
+	resetGlobalConfig()
+	AppName = "TESTPARTIAL"
+
+	// 일부 환경변수만 설정
+	t.Setenv("TESTPARTIAL_SERVER_HOST", "envhost")
+	t.Setenv("TESTPARTIAL_DATABASE_USER", "envuser")
+	// 나머지는 기본값 사용
+
+	err := LoadConfig[TestPartialConfig]()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	cfg := GetConfig[TestPartialConfig]()
+
+	// 환경변수로 설정된 값 검증
+	if cfg.Server.Host != "envhost" {
+		t.Errorf("expected server host to be 'envhost' (from env), got '%s'", cfg.Server.Host)
+	}
+	if cfg.Database.User != "envuser" {
+		t.Errorf("expected database user to be 'envuser' (from env), got '%s'", cfg.Database.User)
+	}
+
+	// 기본값 검증
+	if cfg.Server.Port != 8080 {
+		t.Errorf("expected server port to be 8080 (default), got %d", cfg.Server.Port)
+	}
+	if cfg.Database.Password != "password" {
+		t.Errorf("expected database password to be 'password' (default), got '%s'", cfg.Database.Password)
+	}
+	if cfg.Database.Timeout != 30 {
+		t.Errorf("expected database timeout to be 30 (default), got %d", cfg.Database.Timeout)
+	}
+}
